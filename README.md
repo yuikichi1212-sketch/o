@@ -2,29 +2,35 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>3D Hyper PVP Arena</title>
+    <title>Realistic Voxel Arena</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; }
         #crosshair {
             position: absolute; top: 50%; left: 50%;
-            width: 20px; height: 20px;
-            border: 2px solid #0f0; border-radius: 50%;
-            transform: translate(-50%, -50%); pointer-events: none;
+            width: 8px; height: 8px; background: rgba(255,255,255,0.5);
+            border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none;
         }
-        #ui {
-            position: absolute; bottom: 20px; left: 20px;
-            color: #0f0; font-size: 24px; text-shadow: 2px 2px #000;
+        #ui-container {
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 10px; background: rgba(0,0,0,0.6); padding: 10px; border-radius: 10px;
         }
-        #msg {
-            position: absolute; top: 20%; left: 50%;
-            transform: translateX(-50%); color: white; text-align: center;
+        .slot {
+            width: 50px; height: 50px; border: 2px solid #555;
+            display: flex; justify-content: center; align-items: center; color: white; font-size: 12px;
         }
+        .active { border-color: #fff; box-shadow: 0 0 10px #fff; }
+        #info { position: absolute; top: 20px; left: 20px; color: white; }
     </style>
 </head>
 <body>
     <div id="crosshair"></div>
-    <div id="ui">Score: <span id="score">0</span></div>
-    <div id="msg">クリックしてスタート<br>(WASDで移動 / Spaceでジャンプ / クリックで射撃)</div>
+    <div id="info">Room: 001 | Player: Guest</div>
+    <div id="ui-container">
+        <div class="slot active" id="slot1">剣</div>
+        <div class="slot" id="slot2">弓</div>
+        <div class="slot" id="slot3">石壁</div>
+        <div class="slot" id="slot4">回復</div>
+    </div>
 
     <script type="importmap">
         { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
@@ -33,168 +39,124 @@
     <script type="module">
         import * as THREE from 'three';
 
-        // --- シーン設定 ---
+        // --- 基本設定 ---
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x050505);
-        scene.fog = new THREE.FogExp2(0x050505, 0.05);
+        scene.background = new THREE.Color(0x87ceeb); // リアルな空色
+        scene.fog = new THREE.Fog(0x87ceeb, 1, 50);
 
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true; // 影を有効に
         document.body.appendChild(renderer.domElement);
 
-        // --- 照明 ---
-        const light = new THREE.HemisphereLight(0xeeeeff, 0x777788, 1);
-        scene.add(light);
+        // --- ライティング ---
+        const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+        sun.position.set(10, 20, 10);
+        sun.castShadow = true;
+        scene.add(sun);
+        scene.add(new THREE.AmbientLight(0x404040, 1));
 
-        // --- プレイヤー変数 ---
-        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false, canJump = false;
-        const velocity = new THREE.Vector3();
-        const direction = new THREE.Vector3();
-        let score = 0;
-
-        // --- オブジェクト管理 ---
-        const objects = []; // 当たり判定用
-        const bullets = [];
-        const enemies = [];
-
-        // --- マップ生成 (面白い構造) ---
-        const floorGeo = new THREE.PlaneGeometry(200, 200);
-        const floorMat = new THREE.MeshPhongMaterial({ color: 0x222222 });
-        const floor = new THREE.Mesh(floorGeo, floorMat);
-        floor.rotation.x = -Math.PI / 2;
-        scene.add(floor);
-        objects.push(floor);
-
-        // ランダムな障害物と浮遊プラットフォーム
-        for (let i = 0; i < 50; i++) {
-            const h = Math.random() * 10 + 2;
-            const boxGeo = new THREE.BoxGeometry(5, h, 5);
-            const boxMat = new THREE.MeshPhongMaterial({ color: Math.random() * 0xffffff });
-            const box = new THREE.Mesh(boxGeo, boxMat);
-            box.position.set(Math.random() * 160 - 80, h/2, Math.random() * 160 - 80);
-            scene.add(box);
-            objects.push(box);
-        }
-
-        // --- 敵の生成 ---
-        function spawnEnemy() {
-            const enemyGeo = new THREE.BoxGeometry(2, 2, 2);
-            const enemyMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-            const enemy = new THREE.Mesh(enemyGeo, enemyMat);
-            enemy.position.set(Math.random() * 100 - 50, 1, Math.random() * 100 - 50);
-            scene.add(enemy);
-            enemies.push(enemy);
-        }
-        for(let i=0; i<10; i++) spawnEnemy();
-
-        // --- コントロール ---
-        document.addEventListener('click', () => {
-            document.body.requestPointerLock();
-            document.getElementById('msg').style.display = 'none';
-        });
-
-        const onKeyDown = (e) => {
-            switch (e.code) {
-                case 'KeyW': moveForward = true; break;
-                case 'KeyS': moveBackward = true; break;
-                case 'KeyA': moveLeft = true; break;
-                case 'KeyD': moveRight = true; break;
-                case 'Space': if (canJump) velocity.y += 15; canJump = false; break;
-            }
+        // --- プレイヤー状態 ---
+        const player = {
+            height: 1.7,
+            speed: 0.12, // 歩行速度をリアルに修正
+            velocity: new THREE.Vector3(),
+            onGround: false,
+            weapon: null,
+            inventory: ['sword', 'bow', 'block', 'heal'],
+            activeSlot: 0
         };
-        const onKeyUp = (e) => {
-            switch (e.code) {
-                case 'KeyW': moveForward = false; break;
-                case 'KeyS': moveBackward = false; break;
-                case 'KeyA': moveLeft = false; break;
-                case 'KeyD': moveRight = false; break;
-            }
-        };
-        document.addEventListener('keydown', onKeyDown);
-        document.addEventListener('keyup', onKeyUp);
 
-        // マウス視点移動
-        document.addEventListener('mousemove', (e) => {
-            if (document.pointerLockElement) {
-                camera.rotation.y -= e.movementX * 0.002;
-                camera.rotation.x -= e.movementY * 0.002;
-                camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
+        // --- マップ生成（リアルなボクセル） ---
+        const blockSize = 1;
+        const geometry = new THREE.BoxGeometry(blockSize, blockSize, blockSize);
+        const material = new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 0.8 });
+        
+        const worldGroup = new THREE.Group();
+        for (let x = -15; x < 15; x++) {
+            for (let z = -15; z < 15; z++) {
+                const h = Math.floor(Math.random() * 2); // 基本の地面
+                for(let y = 0; y <= h; y++) {
+                    const block = new THREE.Mesh(geometry, material);
+                    block.position.set(x, y - 1, z);
+                    block.receiveShadow = true;
+                    block.castShadow = true;
+                    worldGroup.add(block);
+                }
             }
-        });
+        }
+        scene.add(worldGroup);
 
-        // 射撃
+        // --- 武器（剣）の作成 ---
+        const swordGeo = new THREE.BoxGeometry(0.1, 0.8, 0.2);
+        const swordMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8 });
+        const sword = new THREE.Mesh(swordGeo, swordMat);
+        camera.add(sword); // カメラに追従
+        sword.position.set(0.5, -0.4, -0.6);
+        sword.rotation.x = Math.PI / 4;
+        scene.add(camera);
+
+        // --- 操作系 ---
+        const keys = {};
+        document.addEventListener('keydown', (e) => keys[e.code] = true);
+        document.addEventListener('keyup', (e) => keys[e.code] = false);
         document.addEventListener('mousedown', (e) => {
             if (document.pointerLockElement) {
-                const bGeo = new THREE.SphereGeometry(0.2);
-                const bMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
-                const bullet = new THREE.Mesh(bGeo, bMat);
-                bullet.position.copy(camera.position);
-                
-                const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-                bullet.userData.velocity = dir.multiplyScalar(2);
-                scene.add(bullet);
-                bullets.push(bullet);
+                if(e.button === 0) attack(); // 左クリ：攻撃
+            } else {
+                document.body.requestPointerLock();
             }
         });
 
-        camera.position.y = 1.6;
+        function attack() {
+            // 剣を振るアニメーション
+            sword.rotation.z += 1.5;
+            setTimeout(() => sword.rotation.z -= 1.5, 150);
+        }
+
+        // --- 移動・カメラロジック ---
+        let pitch = 0;
+        let yaw = 0;
+        document.addEventListener('mousemove', (e) => {
+            if (document.pointerLockElement) {
+                yaw -= e.movementX * 0.0015;
+                pitch -= e.movementY * 0.0015;
+                pitch = Math.max(-Math.PI/2.2, Math.min(Math.PI/2.2, pitch));
+                
+                camera.rotation.set(pitch, yaw, 0, 'YXZ');
+            }
+        });
+
+        function updateMovement() {
+            const dir = new THREE.Vector3();
+            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw));
+            const right = new THREE.Vector3(1, 0, 0).applyQuaternion(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw));
+
+            if (keys['KeyW']) dir.add(forward);
+            if (keys['KeyS']) dir.sub(forward);
+            if (keys['KeyA']) dir.sub(right);
+            if (keys['KeyD']) dir.add(right);
+
+            if (dir.length() > 0) {
+                dir.normalize().multiplyScalar(player.speed);
+                camera.position.add(dir);
+                // 歩行時の揺れ（ヘッドボブ）
+                camera.position.y = player.height + Math.sin(Date.now() * 0.01) * 0.03;
+            }
+        }
 
         // --- メインループ ---
-        let prevTime = performance.now();
+        camera.position.y = player.height;
+
         function animate() {
             requestAnimationFrame(animate);
-            const time = performance.now();
-            const delta = (time - prevTime) / 1000;
-
-            // 移動計算
-            velocity.x -= velocity.x * 10.0 * delta;
-            velocity.z -= velocity.z * 10.0 * delta;
-            velocity.y -= 9.8 * 4.0 * delta; // 重力
-
-            direction.z = Number(moveForward) - Number(moveBackward);
-            direction.x = Number(moveRight) - Number(moveLeft);
-            direction.normalize();
-
-            if (moveForward || moveBackward) velocity.z -= direction.z * 400.0 * delta;
-            if (moveLeft || moveRight) velocity.x -= direction.x * 400.0 * delta;
-
-            camera.translateX(-velocity.x * delta);
-            camera.translateZ(velocity.z * delta);
-            camera.position.y += velocity.y * delta;
-
-            if (camera.position.y < 1.6) {
-                velocity.y = 0;
-                camera.position.y = 1.6;
-                canJump = true;
-            }
-
-            // 弾の移動と判定
-            bullets.forEach((b, index) => {
-                b.position.add(b.userData.velocity);
-                if(b.position.length() > 200) {
-                    scene.remove(b);
-                    bullets.splice(index, 1);
-                }
-                // 敵との当たり判定
-                enemies.forEach((en, ei) => {
-                    if(b.position.distanceTo(en.position) < 2) {
-                        scene.remove(en);
-                        enemies.splice(ei, 1);
-                        scene.remove(b);
-                        bullets.splice(index, 1);
-                        score += 100;
-                        document.getElementById('score').innerText = score;
-                        spawnEnemy();
-                    }
-                });
-            });
-
+            updateMovement();
             renderer.render(scene, camera);
-            prevTime = time;
         }
         animate();
 
+        // リサイズ対応
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
