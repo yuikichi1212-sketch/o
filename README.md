@@ -1,31 +1,20 @@
+<!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>THE ULTIMATE VOXEL PVP - COMPLETE EDITION</title>
+    <title>ULTIMATE REAL-PVP ARENA</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #87ceeb; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        #crosshair {
-            position: absolute; top: 50%; left: 50%; width: 14px; height: 14px;
-            border: 2px solid rgba(255,255,255,0.8); transform: translate(-50%, -50%); pointer-events: none;
-        }
+        body { margin: 0; overflow: hidden; background: #050505; font-family: 'Arial', sans-serif; }
         #ui {
-            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
-            display: flex; gap: 10px; background: rgba(0,0,0,0.7); padding: 15px; border-radius: 12px;
-            border: 2px solid #444; backdrop-filter: blur(5px);
+            position: absolute; bottom: 30px; left: 30px; color: #00fff2;
+            background: rgba(0,0,0,0.7); padding: 20px; border-radius: 10px; border: 1px solid #00fff2;
         }
-        .slot {
-            width: 60px; height: 60px; border: 2px solid #555; display: flex;
-            flex-direction: column; justify-content: center; align-items: center;
-            color: white; font-size: 10px; position: relative;
+        #hp-bar { width: 200px; height: 10px; background: #222; margin-top: 10px; border-radius: 5px; }
+        #hp-fill { width: 100%; height: 100%; background: #00fff2; transition: 0.2s; }
+        #crosshair {
+            position: absolute; top: 50%; left: 50%; width: 10px; height: 10px;
+            border: 1px solid #fff; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none;
         }
-        .slot.active { border-color: #00ffcc; box-shadow: 0 0 15px #00ffcc; }
-        .count { position: absolute; bottom: 2px; right: 4px; font-weight: bold; }
-        #status {
-            position: absolute; top: 20px; left: 20px; color: white;
-            background: rgba(0,0,0,0.6); padding: 15px; border-radius: 8px;
-        }
-        #hp-bar { width: 200px; height: 12px; background: #222; margin-top: 8px; border-radius: 6px; overflow: hidden; }
-        #hp-fill { width: 100%; height: 100%; background: linear-gradient(90deg, #ff416c, #ff4b2b); transition: 0.2s; }
         #overlay {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.8); color: white; display: flex;
@@ -35,33 +24,33 @@
 </head>
 <body>
     <div id="crosshair"></div>
-    <div id="status">
-        <div>PLAYER STATUS</div>
-        <div id="hp-bar"><div id="hp-fill"></div></div>
-        <div style="margin-top:10px;">SCORE: <span id="score">0</span></div>
-    </div>
     <div id="ui">
-        <div class="slot active" id="s0"><span>SWORD</span><div class="count">∞</div></div>
-        <div class="slot" id="s1"><span>PICKAXE</span><div class="count">∞</div></div>
-        <div class="slot" id="s2"><span>BLOCK</span><div class="count" id="block-count">0</div></div>
+        <div style="font-size: 12px;">PLAYER NEURAL LINK</div>
+        <div id="hp-bar"><div id="hp-fill"></div></div>
+        <div style="margin-top:10px;">KILLS: <span id="score">0</span> | AMMO: ∞</div>
+        <div style="font-size: 10px; color: #888; margin-top:5px;">[1] Sword [2] Gun | WASD: Move</div>
     </div>
     <div id="overlay">
-        <h1>ULTIMATE VOXEL PVP</h1>
-        <p>クリックしてゲーム開始</p>
-        <p style="font-size: 14px; color: #aaa;">WASD: 移動 | 左クリ: 攻撃・採掘 | 右クリ: 設置 | 1-3: 切替</p>
+        <h1 style="letter-spacing: 10px;">REAL-PVP ARENA</h1>
+        <p>クリックしてシステムを起動</p>
     </div>
 
-    <script type="importmap">
-        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
-    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
 
-    <script type="module">
-        import * as THREE from 'three';
+    <script>
+        // --- 設定 ---
+        let hp = 100, score = 0, isDead = false, activeWeapon = 1;
+        const enemies = [], bullets = [], keys = {};
 
-        // --- Core Setup ---
+        // --- 物理ワールド ---
+        const world = new CANNON.World();
+        world.gravity.set(0, -18, 0);
+
+        // --- Three.js ---
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x87ceeb);
-        scene.fog = new THREE.Fog(0x87ceeb, 10, 80);
+        scene.background = new THREE.Color(0x0a0a10);
+        scene.fog = new THREE.FogExp2(0x0a0a10, 0.02);
 
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -69,97 +58,67 @@
         renderer.shadowMap.enabled = true;
         document.body.appendChild(renderer.domElement);
 
-        // --- Lights ---
-        const ambient = new THREE.AmbientLight(0xffffff, 0.6);
-        scene.add(ambient);
-        const sun = new THREE.DirectionalLight(0xffffff, 1.2);
-        sun.position.set(50, 80, 50);
+        // --- 地形生成 (リアルな凸凹地面) ---
+        const groundMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.8 });
+        const groundGeo = new THREE.PlaneGeometry(200, 200, 64, 64);
+        groundGeo.rotateX(-Math.PI / 2);
+        
+        const vertices = groundGeo.attributes.position.array;
+        for (let i = 0; i < vertices.length; i += 3) {
+            const x = vertices[i], z = vertices[i+2];
+            vertices[i+1] = Math.sin(x * 0.1) * 2 + Math.cos(z * 0.1) * 2; // スムーズな起伏
+        }
+        const groundMesh = new THREE.Mesh(groundGeo, groundMat);
+        groundMesh.receiveShadow = true;
+        scene.add(groundMesh);
+
+        const physGround = new CANNON.Body({ mass: 0 });
+        physGround.addShape(new CANNON.Plane());
+        physGround.quaternion.setFromAxisAngle(new CANNON.Vector3(1,0,0), -Math.PI/2);
+        world.addBody(physGround);
+
+        // --- プレイヤー物理 ---
+        const playerBody = new CANNON.Body({ mass: 60, fixedRotation: true });
+        playerBody.addShape(new CANNON.Sphere(1));
+        playerBody.position.set(0, 10, 0); // 空中からスポーンして落下
+        world.addBody(playerBody);
+
+        // --- 手・武器のビジュアル ---
+        const armGroup = new THREE.Group();
+        const hand = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.8), new THREE.MeshStandardMaterial({color: 0xffdbac}));
+        hand.position.set(0.5, -0.4, -0.6);
+        
+        const sword = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.5, 0.2), new THREE.MeshStandardMaterial({color: 0xcccccc, metalness: 0.8}));
+        sword.position.set(0, 0.6, -0.4);
+        sword.rotation.x = -Math.PI/4;
+
+        const gun = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.25, 0.6), new THREE.MeshStandardMaterial({color: 0x333333}));
+        gun.position.set(0, 0, -0.4);
+        gun.visible = false;
+
+        hand.add(sword, gun);
+        armGroup.add(hand);
+        camera.add(armGroup);
+        scene.add(camera);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+        const sun = new THREE.DirectionalLight(0xffffff, 1);
+        sun.position.set(10, 50, 10);
         sun.castShadow = true;
         scene.add(sun);
 
-        // --- Game State ---
-        let hp = 100, score = 0, blockInv = 10;
-        let activeSlot = 0; // 0:Sword, 1:Pickaxe, 2:Block
-        let isAttacking = false;
-        const keys = {};
-        const enemies = [];
-        const worldBlocks = [];
-
-        // --- Realistic Terrain Generation ---
-        const boxGeo = new THREE.BoxGeometry(1, 1, 1);
-        const terrainGroup = new THREE.Group();
-        for (let x = -30; x < 30; x++) {
-            for (let z = -30; z < 30; z++) {
-                const noise = Math.sin(x * 0.15) * 2.5 + Math.cos(z * 0.15) * 2.5;
-                const h = Math.floor(noise + 5);
-                for (let y = 0; y < h; y++) {
-                    const color = y === h - 1 ? 0x55aa55 : (y > h - 3 ? 0x8b4513 : 0x777777);
-                    const block = new THREE.Mesh(boxGeo, new THREE.MeshStandardMaterial({ color }));
-                    block.position.set(x, y, z);
-                    block.receiveShadow = true;
-                    if (y === h - 1) block.castShadow = true;
-                    terrainGroup.add(block);
-                    worldBlocks.push(block);
-                }
-            }
-        }
-        scene.add(terrainGroup);
-
-        // --- Player Model (Hand & Weapon) ---
-        const handRoot = new THREE.Group();
-        const arm = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 1), new THREE.MeshStandardMaterial({ color: 0xffdbac }));
-        arm.position.set(0.5, -0.4, -0.6);
-        
-        const sword = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.5, 0.3), new THREE.MeshStandardMaterial({ color: 0xdddddd, metalness: 0.8, roughness: 0.2 }));
-        sword.position.set(0, 0.6, -0.4);
-        sword.rotation.x = -Math.PI/4;
-        
-        const heldBlock = new THREE.Mesh(boxGeo, new THREE.MeshStandardMaterial({ color: 0x8b4513 }));
-        heldBlock.scale.set(0.4, 0.4, 0.4);
-        heldBlock.position.set(0, 0.2, -0.5);
-        heldBlock.visible = false;
-
-        arm.add(sword);
-        arm.add(heldBlock);
-        handRoot.add(arm);
-        camera.add(handRoot);
-        scene.add(camera);
-
-        // --- CPU AI (Enemies) ---
-        function spawnEnemy() {
-            const bot = new THREE.Group();
-            const body = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.8, 0.8), new THREE.MeshStandardMaterial({ color: 0xff3333 }));
-            body.position.y = 0.9;
-            bot.add(body);
-            bot.position.set(Math.random()*40-20, 10, Math.random()*40-20);
-            scene.add(bot);
-            enemies.push({ mesh: bot, hp: 5, lastHit: 0 });
-        }
-        for(let i=0; i<4; i++) spawnEnemy();
-
-        // --- Controls ---
-        const overlay = document.getElementById('overlay');
-        overlay.onclick = () => {
+        // --- 操作 ---
+        document.getElementById('overlay').onclick = () => {
             document.body.requestPointerLock();
-            overlay.style.display = 'none';
+            document.getElementById('overlay').style.display = 'none';
         };
 
-        document.addEventListener('keydown', (e) => {
+        window.addEventListener('keydown', (e) => {
             keys[e.code] = true;
-            if(e.code === 'Digit1') switchSlot(0);
-            if(e.code === 'Digit2') switchSlot(1);
-            if(e.code === 'Digit3') switchSlot(2);
+            if(e.code === 'Digit1') { activeWeapon = 1; sword.visible = true; gun.visible = false; }
+            if(e.code === 'Digit2') { activeWeapon = 2; sword.visible = false; gun.visible = true; }
         });
-        document.addEventListener('keyup', (e) => keys[e.code] = false);
+        window.addEventListener('keyup', (e) => keys[e.code] = false);
 
-        function switchSlot(n) {
-            activeSlot = n;
-            document.querySelectorAll('.slot').forEach((s, i) => s.classList.toggle('active', i === n));
-            sword.visible = (n === 0 || n === 1);
-            heldBlock.visible = (n === 2);
-        }
-
-        // --- Combat & Interaction ---
         let yaw = 0, pitch = 0;
         document.addEventListener('mousemove', (e) => {
             if (document.pointerLockElement) {
@@ -170,104 +129,105 @@
             }
         });
 
-        window.onmousedown = (e) => {
+        // --- 攻撃機能 ---
+        window.onmousedown = () => {
             if (!document.pointerLockElement) return;
-            if (e.button === 0) performAttack(); // Left Click
-            if (e.button === 2) placeBlock();    // Right Click
+            // 攻撃アニメ
+            hand.rotation.x += 0.5;
+            setTimeout(() => hand.rotation.x -= 0.5, 100);
+
+            if (activeWeapon === 2) {
+                const bBody = new CANNON.Body({ mass: 0.1 });
+                bBody.addShape(new CANNON.Sphere(0.1));
+                const dir = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+                bBody.position.set(playerBody.position.x + dir.x, playerBody.position.y + dir.y, playerBody.position.z + dir.z);
+                bBody.velocity.set(dir.x*60, dir.y*60, dir.z*60);
+                world.addBody(bBody);
+                const bMesh = new THREE.Mesh(new THREE.SphereGeometry(0.1), new THREE.MeshBasicMaterial({color: 0x00fff2}));
+                scene.add(bMesh);
+                bullets.push({body: bBody, mesh: bMesh, life: 100});
+            } else {
+                // 近接判定
+                enemies.forEach(en => {
+                    if (playerBody.position.distanceTo(en.body.position) < 3) en.hp -= 2;
+                });
+            }
         };
 
-        function performAttack() {
-            if (isAttacking) return;
-            isAttacking = true;
-            
-            // Animation
-            const tl = setInterval(() => {
-                arm.rotation.x += 0.2;
-                if(arm.rotation.x > 1) {
-                    clearInterval(tl);
-                    setTimeout(() => { arm.rotation.x = 0; isAttacking = false; }, 100);
-                }
-            }, 20);
-
-            // Logic
-            if (activeSlot === 0) { // Sword
-                enemies.forEach((en, i) => {
-                    if (camera.position.distanceTo(en.mesh.position) < 4) {
-                        en.hp--;
-                        if(en.hp <= 0) {
-                            scene.remove(en.mesh);
-                            enemies.splice(i, 1);
-                            score += 1000;
-                            document.getElementById('score').innerText = score;
-                            setTimeout(spawnEnemy, 5000);
-                        }
-                    }
-                });
-            } else if (activeSlot === 1) { // Pickaxe
-                blockInv++;
-                document.getElementById('block-count').innerText = blockInv;
-            }
+        // --- CPU AI ---
+        function spawnEnemy() {
+            const eBody = new CANNON.Body({ mass: 50, fixedRotation: true });
+            eBody.addShape(new CANNON.Cylinder(0.5, 0.5, 2, 8));
+            eBody.position.set(Math.random()*40-20, 5, Math.random()*40-20);
+            world.addBody(eBody);
+            const eMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.5, 1), new THREE.MeshStandardMaterial({color: 0xff4444}));
+            scene.add(eMesh);
+            enemies.push({body: eBody, mesh: eMesh, hp: 5});
         }
+        for(let i=0; i<4; i++) spawnEnemy();
 
-        function placeBlock() {
-            if (activeSlot === 2 && blockInv > 0) {
-                const b = new THREE.Mesh(boxGeo, new THREE.MeshStandardMaterial({ color: 0x8b4513 }));
-                const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-                b.position.copy(camera.position).add(dir.multiplyScalar(3));
-                b.position.round();
-                scene.add(b);
-                blockInv--;
-                document.getElementById('block-count').innerText = blockInv;
-            }
-        }
-
-        // --- Game Loop ---
-        camera.position.set(0, 15, 0);
-
+        // --- ループ ---
         function animate() {
             requestAnimationFrame(animate);
-            
-            // Movement
-            const move = new THREE.Vector3();
-            if (keys['KeyW']) move.z -= 1;
-            if (keys['KeyS']) move.z += 1;
-            if (keys['KeyA']) move.x -= 1;
-            if (keys['KeyD']) move.x += 1;
-            
-            if (move.length() > 0) {
-                move.normalize().multiplyScalar(0.12).applyQuaternion(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw));
-                camera.position.add(move);
-                // Head Bobbing
-                camera.position.y = 6 + Math.sin(Date.now() * 0.01) * 0.04;
+            world.step(1/60);
+
+            if (!isDead) {
+                // 移動制御
+                const moveSpeed = 8;
+                const front = new THREE.Vector3(0,0,-1).applyQuaternion(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), yaw));
+                const right = new THREE.Vector3(1,0,0).applyQuaternion(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), yaw));
+                let v = new THREE.Vector3();
+                if(keys['KeyW']) v.add(front);
+                if(keys['KeyS']) v.sub(front);
+                if(keys['KeyA']) v.sub(right);
+                if(keys['KeyD']) v.add(right);
+                
+                if(v.length() > 0) {
+                    v.normalize().multiplyScalar(moveSpeed);
+                    playerBody.velocity.x = v.x;
+                    playerBody.velocity.z = v.z;
+                }
+                if(keys['Space'] && Math.abs(playerBody.velocity.y) < 0.1) playerBody.velocity.y = 10;
+
+                camera.position.copy(playerBody.position);
+                camera.position.y += 0.8; // 目線の高さ
+                // ヘッドボブ
+                if(v.length() > 0) camera.position.y += Math.sin(Date.now()*0.01)*0.05;
             }
 
-            // Enemy AI
-            enemies.forEach(en => {
-                const diff = camera.position.clone().sub(en.mesh.position);
-                diff.y = 0;
-                if(diff.length() > 1.2) {
-                    en.mesh.position.add(diff.normalize().multiplyScalar(0.04));
-                }
-                en.mesh.lookAt(camera.position.x, en.mesh.position.y, camera.position.z);
+            // 弾丸更新
+            bullets.forEach((b, i) => {
+                b.mesh.position.copy(b.body.position);
+                enemies.forEach(en => {
+                    if(b.body.position.distanceTo(en.body.position) < 1.2) { en.hp -= 1; b.life = 0; }
+                });
+                b.life--;
+                if(b.life <= 0) { world.remove(b.body); scene.remove(b.mesh); bullets.splice(i, 1); }
+            });
 
-                // Attack Player
-                if (diff.length() < 1.5 && Date.now() - en.lastHit > 1000) {
-                    hp -= 10;
-                    en.lastHit = Date.now();
-                    document.getElementById('hp-fill').style.width = hp + "%";
-                    if(hp <= 0) alert("GAME OVER! スコア: " + score);
+            // 敵AI更新
+            enemies.forEach((en, i) => {
+                en.mesh.position.copy(en.body.position);
+                const toP = new THREE.Vector3().subVectors(playerBody.position, en.body.position);
+                if(toP.length() < 20) {
+                    toP.y = 0;
+                    en.body.velocity.x = toP.normalize().x * 3;
+                    en.body.velocity.z = toP.z * 3;
+                    if(toP.length() < 1.5) hp -= 0.1; // 攻撃を受ける
+                }
+                if(en.hp <= 0) {
+                    world.remove(en.body); scene.remove(en.mesh); enemies.splice(i, 1);
+                    score++; document.getElementById('score').innerText = score;
+                    setTimeout(spawnEnemy, 3000);
                 }
             });
+
+            document.getElementById('hp-fill').style.width = hp + "%";
+            if(hp <= 0 && !isDead) { isDead = true; alert("CONNECTION LOST. SCORE: " + score); location.reload(); }
 
             renderer.render(scene, camera);
         }
         animate();
-
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
     </script>
 </body>
 </html>
