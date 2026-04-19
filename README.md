@@ -1,97 +1,205 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <title>ゆいきちドキュメント</title>
-  <style>
-    /* ---------- 基本レイアウト ---------- */
-    body { margin: 0; font-family: 'Noto Sans JP', Arial, sans-serif; background:#fff; }
-    #toolbar {
-      background:#f1f3f4;
-      border-bottom:1px solid #dadce0;
-      padding:6px 8px;
-      display:flex;
-      align-items:center;
-      gap:4px;
-      flex-wrap:wrap;
-    }
-    #toolbar button { background:none; border:none; padding:4px 8px; cursor:pointer; }
-    #toolbar button:hover { background:#e8eaed; }
-    #editor {
-      padding:12px 20px;
-      min-height:80vh;
-      outline:none;
-      white-space:pre-wrap;
-    }
-    /* ---------- フォントサイズドロップダウン ---------- */
-    select { padding:2px 4px; }
-  </style>
+    <meta charset="UTF-8">
+    <title>3D Hyper PVP Arena</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
+        #crosshair {
+            position: absolute; top: 50%; left: 50%;
+            width: 20px; height: 20px;
+            border: 2px solid #0f0; border-radius: 50%;
+            transform: translate(-50%, -50%); pointer-events: none;
+        }
+        #ui {
+            position: absolute; bottom: 20px; left: 20px;
+            color: #0f0; font-size: 24px; text-shadow: 2px 2px #000;
+        }
+        #msg {
+            position: absolute; top: 20%; left: 50%;
+            transform: translateX(-50%); color: white; text-align: center;
+        }
+    </style>
 </head>
 <body>
-  <!-- ① ツールバー -->
-  <div id="toolbar">
-    <button onclick="execCmd('undo')">↺</button>
-    <button onclick="execCmd('redo')">↻</button>
-    <button onclick="execCmd('bold')"><b>太</b></button>
-    <button onclick="execCmd('italic')"><i>斜</i></button>
-    <button onclick="execCmd('underline')"><u>下</u></button>
-    <button onclick="execCmd('strikethrough')"><s>取り消し線</s></button>
-    <select onchange="execCmd('fontName', this.value)">
-      <option>Arial</option>
-      <option>Courier New</option>
-      <option>Georgia</option>
-      <option>Helvetica</option>
-      <option>Times New Roman</option>
-      <option>Verdana</option>
-    </select>
-    <select onchange="execCmd('fontSize', this.value)">
-      <!-- Google Docs スタイル (ポイント) -->
-      <option value="1">8</option>
-      <option value="2">10</option>
-      <option value="3">12</option>
-      <option value="4">14</option>
-      <option value="5">18</option>
-      <option value="6">24</option>
-      <option value="7">36</option>
-    </select>
-    <button onclick="saveDocument()">💾 保存</button>
-    <button onclick="loadDocument()">📂 読み込み</button>
-  </div>
+    <div id="crosshair"></div>
+    <div id="ui">Score: <span id="score">0</span></div>
+    <div id="msg">クリックしてスタート<br>(WASDで移動 / Spaceでジャンプ / クリックで射撃)</div>
 
-  <!-- ② エディタ（contenteditable） -->
-  <div id="editor" contenteditable="true">
-    ここにテキストを書いてみてください...
-  </div>
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+    </script>
 
-  <!-- ③ スクリプト -->
-  <script>
-    const editor = document.getElementById('editor');
+    <script type="module">
+        import * as THREE from 'three';
 
-    /* コマンド実行ユーティリティ */
-    function execCmd(cmd, value = null) {
-      document.execCommand(cmd, false, value);
-      editor.focus();
-    }
+        // --- シーン設定 ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050505);
+        scene.fog = new THREE.FogExp2(0x050505, 0.05);
 
-    /* 簡易保存（localStorage） */
-    function saveDocument() {
-      const content = editor.innerHTML;
-      localStorage.setItem('yulimitDoc', content);
-      alert('保存しました！');
-    }
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
 
-    function loadDocument() {
-      const content = localStorage.getItem('yulimitDoc');
-      if (content) {
-        editor.innerHTML = content;
-        alert('読み込み成功！');
-      } else {
-        alert('保存データがありません。');
-      }
-    }
+        // --- 照明 ---
+        const light = new THREE.HemisphereLight(0xeeeeff, 0x777788, 1);
+        scene.add(light);
 
-    /* 初期化時に自動で読み込み（任意） */
-    window.addEventListener('load', loadDocument);
-  </script>
+        // --- プレイヤー変数 ---
+        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false, canJump = false;
+        const velocity = new THREE.Vector3();
+        const direction = new THREE.Vector3();
+        let score = 0;
+
+        // --- オブジェクト管理 ---
+        const objects = []; // 当たり判定用
+        const bullets = [];
+        const enemies = [];
+
+        // --- マップ生成 (面白い構造) ---
+        const floorGeo = new THREE.PlaneGeometry(200, 200);
+        const floorMat = new THREE.MeshPhongMaterial({ color: 0x222222 });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        scene.add(floor);
+        objects.push(floor);
+
+        // ランダムな障害物と浮遊プラットフォーム
+        for (let i = 0; i < 50; i++) {
+            const h = Math.random() * 10 + 2;
+            const boxGeo = new THREE.BoxGeometry(5, h, 5);
+            const boxMat = new THREE.MeshPhongMaterial({ color: Math.random() * 0xffffff });
+            const box = new THREE.Mesh(boxGeo, boxMat);
+            box.position.set(Math.random() * 160 - 80, h/2, Math.random() * 160 - 80);
+            scene.add(box);
+            objects.push(box);
+        }
+
+        // --- 敵の生成 ---
+        function spawnEnemy() {
+            const enemyGeo = new THREE.BoxGeometry(2, 2, 2);
+            const enemyMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+            const enemy = new THREE.Mesh(enemyGeo, enemyMat);
+            enemy.position.set(Math.random() * 100 - 50, 1, Math.random() * 100 - 50);
+            scene.add(enemy);
+            enemies.push(enemy);
+        }
+        for(let i=0; i<10; i++) spawnEnemy();
+
+        // --- コントロール ---
+        document.addEventListener('click', () => {
+            document.body.requestPointerLock();
+            document.getElementById('msg').style.display = 'none';
+        });
+
+        const onKeyDown = (e) => {
+            switch (e.code) {
+                case 'KeyW': moveForward = true; break;
+                case 'KeyS': moveBackward = true; break;
+                case 'KeyA': moveLeft = true; break;
+                case 'KeyD': moveRight = true; break;
+                case 'Space': if (canJump) velocity.y += 15; canJump = false; break;
+            }
+        };
+        const onKeyUp = (e) => {
+            switch (e.code) {
+                case 'KeyW': moveForward = false; break;
+                case 'KeyS': moveBackward = false; break;
+                case 'KeyA': moveLeft = false; break;
+                case 'KeyD': moveRight = false; break;
+            }
+        };
+        document.addEventListener('keydown', onKeyDown);
+        document.addEventListener('keyup', onKeyUp);
+
+        // マウス視点移動
+        document.addEventListener('mousemove', (e) => {
+            if (document.pointerLockElement) {
+                camera.rotation.y -= e.movementX * 0.002;
+                camera.rotation.x -= e.movementY * 0.002;
+                camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
+            }
+        });
+
+        // 射撃
+        document.addEventListener('mousedown', (e) => {
+            if (document.pointerLockElement) {
+                const bGeo = new THREE.SphereGeometry(0.2);
+                const bMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+                const bullet = new THREE.Mesh(bGeo, bMat);
+                bullet.position.copy(camera.position);
+                
+                const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+                bullet.userData.velocity = dir.multiplyScalar(2);
+                scene.add(bullet);
+                bullets.push(bullet);
+            }
+        });
+
+        camera.position.y = 1.6;
+
+        // --- メインループ ---
+        let prevTime = performance.now();
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = performance.now();
+            const delta = (time - prevTime) / 1000;
+
+            // 移動計算
+            velocity.x -= velocity.x * 10.0 * delta;
+            velocity.z -= velocity.z * 10.0 * delta;
+            velocity.y -= 9.8 * 4.0 * delta; // 重力
+
+            direction.z = Number(moveForward) - Number(moveBackward);
+            direction.x = Number(moveRight) - Number(moveLeft);
+            direction.normalize();
+
+            if (moveForward || moveBackward) velocity.z -= direction.z * 400.0 * delta;
+            if (moveLeft || moveRight) velocity.x -= direction.x * 400.0 * delta;
+
+            camera.translateX(-velocity.x * delta);
+            camera.translateZ(velocity.z * delta);
+            camera.position.y += velocity.y * delta;
+
+            if (camera.position.y < 1.6) {
+                velocity.y = 0;
+                camera.position.y = 1.6;
+                canJump = true;
+            }
+
+            // 弾の移動と判定
+            bullets.forEach((b, index) => {
+                b.position.add(b.userData.velocity);
+                if(b.position.length() > 200) {
+                    scene.remove(b);
+                    bullets.splice(index, 1);
+                }
+                // 敵との当たり判定
+                enemies.forEach((en, ei) => {
+                    if(b.position.distanceTo(en.position) < 2) {
+                        scene.remove(en);
+                        enemies.splice(ei, 1);
+                        scene.remove(b);
+                        bullets.splice(index, 1);
+                        score += 100;
+                        document.getElementById('score').innerText = score;
+                        spawnEnemy();
+                    }
+                });
+            });
+
+            renderer.render(scene, camera);
+            prevTime = time;
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
 </body>
 </html>
